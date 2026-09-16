@@ -1,0 +1,19 @@
+import type { AppSnapshot, Photo, Spot, Visit, WorkStatus } from "../types";
+import { emptySnapshot, newId, nowIso } from "../types";
+
+type LegacyExport = { formatVersion?: number; works?: Record<string, unknown>[]; spots?: Record<string, unknown>[]; visits?: Record<string, unknown>[]; photos?: Record<string, unknown>[]; tags?: Record<string, unknown>[] };
+const text = (value: unknown) => typeof value === "string" ? value : null;
+const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
+
+export function convertLegacyExport(raw: unknown): AppSnapshot {
+  if (!raw || typeof raw !== "object") throw new Error("旧网站导出文件格式无效");
+  const data = raw as LegacyExport;
+  if (data.formatVersion !== 1 || !Array.isArray(data.works) || !Array.isArray(data.spots)) throw new Error("只支持旧网站 formatVersion 1 导出文件");
+  const snapshot = emptySnapshot(); const timestamp = nowIso();
+  snapshot.works = data.works.map((item) => ({ id: String(item.id ?? newId()), legacyId: String(item.id ?? ""), titleCn: String(item.titleCn ?? "未命名作品"), titleOriginal: text(item.titleOriginal), coverUrl: text(item.coverUrl), anitabiBangumiId: number(item.anitabiBangumiId), releaseYear: number(item.releaseYear), description: text(item.description), personalNote: text(item.personalNote), status: (["not_started", "in_progress", "completed", "archived"].includes(String(item.status)) ? item.status : "not_started") as WorkStatus, createdAt: text(item.createdAt) ?? timestamp, updatedAt: text(item.updatedAt) ?? timestamp }));
+  snapshot.spots = data.spots.map((item): Spot => ({ id: String(item.id ?? newId()), legacyId: String(item.id ?? ""), workId: String(item.workId ?? ""), name: String(item.name ?? "未命名地点"), country: text(item.country), region: text(item.region), city: text(item.city), address: text(item.address), latitude: number(item.latitude) ?? 0, longitude: number(item.longitude) ?? 0, episode: text(item.episode), sceneTimestamp: text(item.sceneTimestamp), sceneDescription: text(item.sceneDescription), transportNote: text(item.transportNote), visitStatus: (["unvisited", "planned", "visited", "skipped"].includes(String(item.visitStatus)) ? item.visitStatus : "unvisited") as Spot["visitStatus"], sourceUrl: text(item.sourceUrl), anitabiPointId: text(item.anitabiPointId), referenceImageUrl: text(item.referenceImageUrl), referenceOrigin: text(item.referenceOrigin), referenceOriginUrl: text(item.referenceOriginUrl), createdAt: text(item.createdAt) ?? timestamp, updatedAt: text(item.updatedAt) ?? timestamp }));
+  snapshot.visits = (data.visits ?? []).map((item): Visit => ({ id: String(item.id ?? newId()), legacyId: String(item.id ?? ""), spotId: String(item.spotId ?? ""), visitedAt: String(item.visitedAt ?? timestamp.slice(0, 10)), visitedTime: text(item.visitedTime), note: text(item.note), weather: text(item.weather), companions: text(item.companions), rating: number(item.rating), matchedAngle: Boolean(item.matchedAngle), createdAt: text(item.createdAt) ?? timestamp, updatedAt: text(item.updatedAt) ?? timestamp }));
+  snapshot.photos = (data.photos ?? []).map((item): Photo => ({ id: String(item.id ?? newId()), legacyId: String(item.id ?? ""), spotId: String(item.spotId ?? ""), visitId: text(item.visitId), relativePath: String(item.storagePath ?? ""), fileUrl: text(item.fileUrl), photoType: (["reference", "visit", "environment"].includes(String(item.photoType)) ? item.photoType : "visit") as Photo["photoType"], caption: text(item.caption), takenAt: text(item.takenAt), sortOrder: number(item.sortOrder) ?? 0, isCover: Boolean(item.isCover), width: number(item.width), height: number(item.height), createdAt: text(item.createdAt) ?? timestamp }));
+  snapshot.tags = (data.tags ?? []).map((item) => ({ id: String(item.id ?? newId()), name: String(item.name ?? "未命名标签") }));
+  return snapshot;
+}

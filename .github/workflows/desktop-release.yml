@@ -1,0 +1,69 @@
+name: Windows checks and release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: checks
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - name: Build NSIS installer
+        run: npm run tauri:build
+      - name: Build portable archive and checksums
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force portable | Out-Null
+          Copy-Item src-tauri/target/release/junrei-journal.exe portable/
+          Copy-Item portable.flag portable/
+          Copy-Item README.md portable/
+          Compress-Archive -Path portable/* -DestinationPath "Junrei-Journal-${{ github.ref_name }}-portable.zip"
+          Get-FileHash "Junrei-Journal-${{ github.ref_name }}-portable.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Junrei-Journal-${{ github.ref_name }}-portable.zip" } | Set-Content checksums.txt
+          Get-ChildItem src-tauri/target/release/bundle/nsis/*setup.exe | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name } | Add-Content checksums.txt
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          prerelease: true
+          files: |
+            src-tauri/target/release/bundle/nsis/*setup.exe
+            Junrei-Journal-${{ github.ref_name }}-portable.zip
+            checksums.txt
