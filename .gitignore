@@ -30,6 +30,7 @@ data/
 *.sqlite3
 *.junrei-backup
 portable/
+Junrei-Journal-*-portable/
 Junrei-Journal-*-portable.zip
 checksums.txt
 

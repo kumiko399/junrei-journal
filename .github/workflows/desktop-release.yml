@@ -55,12 +55,31 @@ jobs:
           Copy-Item src-tauri/target/release/junrei-journal.exe portable/
           Copy-Item portable.flag portable/
           Copy-Item README.md portable/
+          Copy-Item LICENSE portable/
+          Copy-Item PRIVACY.md portable/
+          Copy-Item THIRD_PARTY_NOTICES.md portable/
           Compress-Archive -Path portable/* -DestinationPath "Junrei-Journal-${{ github.ref_name }}-portable.zip"
           Get-FileHash "Junrei-Journal-${{ github.ref_name }}-portable.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Junrei-Journal-${{ github.ref_name }}-portable.zip" } | Set-Content checksums.txt
           Get-ChildItem src-tauri/target/release/bundle/nsis/*setup.exe | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name } | Add-Content checksums.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          body: |
+            ## 巡礼手账 ${{ github.ref_name }}
+
+            这是巡礼手账的首个 Windows x64 预发布版本。应用采用本地优先设计，无需注册或登录。
+
+            ### 下载说明
+
+            - 安装版：下载 `setup.exe` 文件。
+            - 便携版：下载 `portable.zip` 文件，完整解压后运行 `junrei-journal.exe`。
+            - 完整性校验：下载 `checksums.txt`，核对安装包或便携版的 SHA-256。
+
+            ### Windows 安全提示
+
+            首版尚未购买代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请只从本仓库的 Releases 页面下载安装包，并在运行前核对 SHA-256 校验值。
+
+            数据默认只保存在本机。首次使用或升级前，建议先阅读 README、隐私说明和第三方许可说明。
           generate_release_notes: true
           prerelease: true
           files: |
