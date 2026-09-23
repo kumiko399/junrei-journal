@@ -5,6 +5,8 @@ import { createMapAdapter, type Coordinate, type MapAdapter, type MapViewState }
 interface Props {
   provider: MapProvider;
   tileUrl: string;
+  tileAttribution?: string;
+  tileAttributionUrl?: string;
   googleApiKey: string;
   spots: Spot[];
   selectedId?: string | null;
@@ -22,10 +24,10 @@ export function MapCanvas(props: Props) {
   useEffect(() => {
     if (!node.current) return;
     const instance = createMapAdapter(props.provider); adapter.current = instance;
-    void instance.mount(node.current, { center: props.view.center, zoom: props.view.zoom, tileUrl: props.tileUrl, googleApiKey: props.googleApiKey, onSpotSelect: props.onSelect, onCoordinatePick: props.onPick, onViewChange: props.onViewChange, onError: props.onProviderError })
+    void instance.mount(node.current, { center: props.view.center, zoom: props.view.zoom, tileUrl: props.tileUrl, tileAttribution: props.tileAttribution, tileAttributionUrl: props.tileAttributionUrl, googleApiKey: props.googleApiKey, onSpotSelect: props.onSelect, onCoordinatePick: props.onPick, onViewChange: props.onViewChange, onError: props.onProviderError })
       .catch((error: unknown) => props.onProviderError(error instanceof Error ? error.message : "地图加载失败"));
     return () => { instance.destroy(); if (adapter.current === instance) adapter.current = null; };
-  }, [props.provider, props.tileUrl, props.googleApiKey]);
+  }, [props.provider, props.tileUrl, props.tileAttribution, props.tileAttributionUrl, props.googleApiKey]);
   useEffect(() => adapter.current?.setSpots(props.spots), [props.spots]);
   useEffect(() => adapter.current?.enableCoordinatePicker(props.picking), [props.picking]);
   useEffect(() => { if (props.selectedId) adapter.current?.focusSpot(props.selectedId); }, [props.selectedId]);

@@ -7,6 +7,8 @@ export interface MapOptions {
   center: Coordinate;
   zoom: number;
   tileUrl: string;
+  tileAttribution?: string;
+  tileAttributionUrl?: string;
   googleApiKey?: string;
   onSpotSelect: (spotId: string) => void;
   onCoordinatePick: (coordinate: Coordinate) => void;
@@ -26,6 +28,21 @@ export interface MapAdapter {
 
 type FeatureCollection = GeoJSON.FeatureCollection<GeoJSON.Point, { id: string; status: string }>;
 
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]!);
+
+function tileAttribution(options: MapOptions) {
+  const label = escapeHtml(options.tileAttribution?.trim() || "地图数据来源未填写");
+  try {
+    const url = new URL(options.tileAttributionUrl || "");
+    if (url.protocol === "https:" || url.protocol === "http:") {
+      return `<a href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+    }
+  } catch {
+    // A plain-text attribution remains visible when no valid terms URL is configured.
+  }
+  return label;
+}
+
 export class OpenMapAdapter implements MapAdapter {
   private map?: MapLibreMap;
   private spots: Spot[] = [];
@@ -41,7 +58,7 @@ export class OpenMapAdapter implements MapAdapter {
       attributionControl: { compact: true },
       style: {
         version: 8,
-        sources: { openstreetmap: { type: "raster", tiles: [options.tileUrl], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
+        sources: { openstreetmap: { type: "raster", tiles: [options.tileUrl], tileSize: 256, attribution: tileAttribution(options) } },
         layers: [{ id: "openstreetmap", type: "raster", source: "openstreetmap" }],
       },
     });

@@ -20,13 +20,20 @@
       "fullscreen": false
     }],
     "security": {
-      "csp": "default-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data: blob: https://image.anitabi.cn https://*.googleapis.com https://*.gstatic.com https://*.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; connect-src 'self' ipc: http://ipc.localhost https://tile.openstreetmap.org https://api.anitabi.cn https://image.anitabi.cn https://*.googleapis.com https://*.gstatic.com https://*.google.com; worker-src 'self' blob:",
+      "csp": "default-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data: blob: https://image.anitabi.cn https://*.googleapis.com https://*.gstatic.com https://*.google.com; style-src 'self' 'unsafe-inline' https://*.googleapis.com; font-src 'self' data: https://*.gstatic.com; script-src 'self' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; connect-src 'self' ipc: http://ipc.localhost https://tile.openstreetmap.org https://api.anitabi.cn https://image.anitabi.cn https://*.googleapis.com https://*.gstatic.com https://*.google.com; worker-src 'self' blob:",
       "assetProtocol": { "enable": true, "scope": ["$APPDATA/**", "$EXE/**", "$RESOURCE/**"] }
     }
   },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "resources": {
+      "../LICENSE": "LICENSE",
+      "../PRIVACY.md": "PRIVACY.md",
+      "../TERMS.md": "TERMS.md",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../THIRD_PARTY_LICENSES.txt": "THIRD_PARTY_LICENSES.txt"
+    },
     "publisher": "Junrei Journal Contributors",
     "category": "Lifestyle",
     "shortDescription": "本地优先的圣地巡礼收藏与记录应用",

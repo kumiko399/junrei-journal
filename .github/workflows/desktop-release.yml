@@ -60,7 +60,9 @@ jobs:
           Copy-Item README.md portable/
           Copy-Item LICENSE portable/
           Copy-Item PRIVACY.md portable/
+          Copy-Item TERMS.md portable/
           Copy-Item THIRD_PARTY_NOTICES.md portable/
+          Copy-Item THIRD_PARTY_LICENSES.txt portable/
           Compress-Archive -Path portable/* -DestinationPath "Junrei-Journal-${{ github.ref_name }}-portable.zip"
           Get-FileHash "Junrei-Journal-${{ github.ref_name }}-portable.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Junrei-Journal-${{ github.ref_name }}-portable.zip" } | Set-Content checksums.txt
           Get-FileHash $releaseInstaller -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $releaseInstaller" } | Add-Content checksums.txt

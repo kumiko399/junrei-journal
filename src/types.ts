@@ -83,6 +83,8 @@ export interface SpotTag { spotId: string; tagId: string }
 export interface AppSettings {
   mapProvider: MapProvider;
   mapStyleUrl: string;
+  mapAttribution?: string;
+  mapAttributionUrl?: string;
   theme: "light" | "dark" | "system";
   compactNavigation: boolean;
 }
@@ -125,6 +127,8 @@ export const emptySnapshot = (): AppSnapshot => ({
   settings: {
     mapProvider: "open",
     mapStyleUrl: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    mapAttribution: "© OpenStreetMap contributors",
+    mapAttributionUrl: "https://www.openstreetmap.org/copyright",
     theme: "light",
     compactNavigation: false,
   },

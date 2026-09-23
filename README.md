@@ -29,6 +29,7 @@
 - 便携版在程序旁检测到 `portable.flag` 后，将数据保存在同目录的 `data` 文件夹。
 - Google API Key 保存在 Windows 凭据管理器中，不写入 SQLite、日志或备份。
 - 地图瓦片和 Anitabi 导入需要网络；收藏、笔记、照片和本地查询可以离线使用。
+- 应用界面使用 Windows 系统字体，不会为了界面字体单独连接 Google Fonts。
 
 更多说明见 [隐私说明](PRIVACY.md) 与 [第三方许可说明](THIRD_PARTY_NOTICES.md)。
 
@@ -81,11 +82,22 @@ NSIS 安装包生成在 `src-tauri/target/release/bundle/nsis/`。GitHub Actions
 
 ## 地图与数据来源
 
-- 默认地图由 [MapLibre GL JS](https://maplibre.org/) 渲染，并使用 [OpenStreetMap](https://www.openstreetmap.org/) 地图数据。应用始终保留署名，不提供公共瓦片批量下载或离线预取。
-- Anitabi 数据依据其[公开 API 文档](https://github.com/anitabi/anitabi.cn-document/blob/main/api.md)接入，并保留来源、原始链接与 CC BY-NC-SA 4.0 署名。
-- Google Maps 是可选功能，需要用户自行配置 API Key、结算账号、API 限制与使用限额。
+- 默认地图由 [MapLibre GL JS](https://maplibre.org/) 渲染，并使用 [OpenStreetMap](https://www.openstreetmap.org/) 地图数据。应用始终保留署名，不提供公共瓦片批量下载或离线预取；改用其他瓦片时必须同时填写对应署名和许可链接。
+- Anitabi 数据依据其[公开 API 文档](https://github.com/anitabi/anitabi.cn-document/blob/main/api.md)接入，并保留来源、原始链接与 [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) 署名。动画截图、封面和作品素材的版权仍归原权利人所有。
+- Google Maps 是可选功能，需要用户自行配置 API Key、结算账号、API 限制与使用限额，并遵守 [Google Maps Platform 服务条款](https://cloud.google.com/maps-platform/terms)和 [Google Maps JavaScript API 政策](https://developers.google.com/maps/documentation/javascript/policies)。
 
 本仓库不包含 Google API Key、Anitabi 数据集、用户照片、个人备份或旧网站数据库。
+
+本项目与 Google、OpenStreetMap Foundation、Anitabi、Bangumi 及任何动画作品制作方、发行方或权利人不存在隶属、授权、认可或赞助关系。第三方名称、标志、地图、数据、截图和作品素材归各自权利人所有。
+
+使用前请阅读：
+
+- [使用条款](TERMS.md)
+- [隐私说明](PRIVACY.md)
+- [第三方数据与许可说明](THIRD_PARTY_NOTICES.md)
+- `THIRD_PARTY_LICENSES.txt`（通过 `npm run licenses` 从当前锁定依赖生成）
+
+如果你是相关权利人并希望更正来源或移除展示，请通过 [GitHub Issues](https://github.com/kumiko399/junrei-journal/issues) 联系维护者；请勿在公开 Issue 中提交身份证件、API Key 或其他敏感信息。
 
 ## 参与贡献
 
@@ -95,6 +107,7 @@ NSIS 安装包生成在 `src-tauri/target/release/bundle/nsis/`。GitHub Actions
 npm test
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
+npm run licenses
 ```
 
 请不要在 Issue、日志、测试数据或提交记录中上传 API Key、个人照片、真实行程或备份文件。
@@ -103,4 +116,4 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 应用源代码以 [MIT License](LICENSE) 发布。
 
-地图数据、地图瓦片、Anitabi 数据、参考截图及其他第三方内容仍受各自许可条款约束，不因本项目采用 MIT License 而被重新授权。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+地图数据、地图瓦片、Anitabi 数据、参考截图及其他第三方内容仍受各自许可条款约束，不因本项目采用 MIT License 而被重新授权。详见[使用条款](TERMS.md)、[第三方数据与许可说明](THIRD_PARTY_NOTICES.md)和随发布包提供的 `THIRD_PARTY_LICENSES.txt`。

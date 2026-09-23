@@ -81,7 +81,14 @@ fn migrate(conn: &Connection) -> Result<()> {
 fn default_snapshot() -> Value {
     json!({
         "schemaVersion": 1, "works": [], "spots": [], "visits": [], "photos": [], "tags": [], "spotTags": [],
-        "settings": { "mapProvider": "open", "mapStyleUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "theme": "light", "compactNavigation": false }
+        "settings": {
+            "mapProvider": "open",
+            "mapStyleUrl": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+            "mapAttribution": "© OpenStreetMap contributors",
+            "mapAttributionUrl": "https://www.openstreetmap.org/copyright",
+            "theme": "light",
+            "compactNavigation": false
+        }
     })
 }
 
