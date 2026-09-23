@@ -51,6 +51,9 @@ jobs:
       - name: Build portable archive and checksums
         shell: pwsh
         run: |
+          $installer = Get-ChildItem src-tauri/target/release/bundle/nsis/*setup.exe | Select-Object -First 1
+          $releaseInstaller = "Junrei-Journal-${{ github.ref_name }}-setup.exe"
+          Copy-Item $installer.FullName $releaseInstaller
           New-Item -ItemType Directory -Force portable | Out-Null
           Copy-Item src-tauri/target/release/junrei-journal.exe portable/
           Copy-Item portable.flag portable/
@@ -60,7 +63,7 @@ jobs:
           Copy-Item THIRD_PARTY_NOTICES.md portable/
           Compress-Archive -Path portable/* -DestinationPath "Junrei-Journal-${{ github.ref_name }}-portable.zip"
           Get-FileHash "Junrei-Journal-${{ github.ref_name }}-portable.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  Junrei-Journal-${{ github.ref_name }}-portable.zip" } | Set-Content checksums.txt
-          Get-ChildItem src-tauri/target/release/bundle/nsis/*setup.exe | ForEach-Object { (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower() + "  " + $_.Name } | Add-Content checksums.txt
+          Get-FileHash $releaseInstaller -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $releaseInstaller" } | Add-Content checksums.txt
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -83,6 +86,6 @@ jobs:
           generate_release_notes: true
           prerelease: true
           files: |
-            src-tauri/target/release/bundle/nsis/*setup.exe
+            Junrei-Journal-${{ github.ref_name }}-setup.exe
             Junrei-Journal-${{ github.ref_name }}-portable.zip
             checksums.txt
