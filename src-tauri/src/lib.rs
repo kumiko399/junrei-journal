@@ -255,7 +255,8 @@ fn photo_thumbnail(bytes: &[u8]) -> Result<(DynamicImage, u32, u32)> {
     let mut image = DynamicImage::from_decoder(decoder)?;
     image.apply_orientation(orientation);
     let (width, height) = (image.width(), image.height());
-    let thumbnail = DynamicImage::ImageRgb8(image.thumbnail(900, 900).to_rgb8());
+    let thumbnail =
+        DynamicImage::ImageRgb8(image.thumbnail(width.min(900), height.min(900)).to_rgb8());
     Ok((thumbnail, width, height))
 }
 
@@ -774,6 +775,16 @@ mod tests {
         let (thumbnail, width, height) = photo_thumbnail(&bytes).unwrap();
         assert_eq!((width, height), (3, 2));
         assert_eq!((thumbnail.width(), thumbnail.height()), (3, 2));
+    }
+
+    #[test]
+    fn large_photo_thumbnail_preserves_aspect_ratio_and_size_limit() {
+        let image = DynamicImage::new_rgb8(1200, 600);
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let (thumbnail, width, height) = photo_thumbnail(bytes.get_ref()).unwrap();
+        assert_eq!((width, height), (1200, 600));
+        assert_eq!((thumbnail.width(), thumbnail.height()), (900, 450));
     }
 
     #[test]
