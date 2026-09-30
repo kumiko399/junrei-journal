@@ -14,8 +14,11 @@ export async function loadSnapshot(): Promise<AppSnapshot> {
   if (isTauri()) return invoke<AppSnapshot>("load_snapshot");
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return emptySnapshot();
-  try { return { ...emptySnapshot(), ...JSON.parse(raw) as AppSnapshot }; }
-  catch { return emptySnapshot(); }
+  const parsed = JSON.parse(raw) as AppSnapshot;
+  if (!parsed || parsed.schemaVersion !== 1 || ![parsed.works, parsed.spots, parsed.visits, parsed.photos, parsed.tags, parsed.spotTags].every(Array.isArray)) {
+    throw new Error("本地预览数据格式无效，请保留原数据后重试。");
+  }
+  return { ...emptySnapshot(), ...parsed, settings: { ...emptySnapshot().settings, ...parsed.settings } };
 }
 
 export async function saveSnapshot(snapshot: AppSnapshot): Promise<void> {
@@ -29,7 +32,7 @@ export async function fetchAnitabi(subjectId: number): Promise<AnitabiPreview> {
     fetch(`https://api.anitabi.cn/bangumi/${subjectId}/lite`),
     fetch(`https://api.anitabi.cn/bangumi/${subjectId}/points/detail?haveImage=true`),
   ]);
-  if (!liteResponse.ok || !pointsResponse.ok) throw new Error(`Anitabi 请求失败（${liteResponse.status || pointsResponse.status}）`);
+  if (!liteResponse.ok || !pointsResponse.ok) throw new Error(`Anitabi 请求失败（${!liteResponse.ok ? liteResponse.status : pointsResponse.status}）`);
   const lite = await liteResponse.json() as Omit<AnitabiPreview, "points">;
   const points = await pointsResponse.json() as AnitabiPreview["points"];
   return { ...lite, points };
@@ -42,12 +45,13 @@ export async function chooseAndImportPhoto(spotId: string, visitId?: string): Pr
     if (!path) return null;
     return invoke<Photo>("import_photo", { sourcePath: path, spotId, visitId: visitId ?? null });
   }
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const input = document.createElement("input"); input.type = "file"; input.accept = "image/jpeg,image/png,image/webp";
     input.onchange = () => {
       const file = input.files?.[0]; if (!file) return resolve(null);
-      const reader = new FileReader(); reader.onload = () => resolve({ id: newId(), spotId, visitId, relativePath: file.name, fileUrl: String(reader.result), photoType: "visit", sortOrder: 0, isCover: false, createdAt: nowIso() }); reader.readAsDataURL(file);
+      const reader = new FileReader(); reader.onerror = () => reject(new Error("无法读取照片，请选择其他文件。")); reader.onload = () => resolve({ id: newId(), spotId, visitId, relativePath: file.name, fileUrl: String(reader.result), photoType: "visit", sortOrder: 0, isCover: false, createdAt: nowIso() }); reader.readAsDataURL(file);
     };
+    input.oncancel = () => resolve(null);
     input.click();
   });
 }

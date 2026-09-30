@@ -1,7 +1,7 @@
 use age::secrecy::SecretString;
 use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
-use image::ImageReader;
+use image::{DynamicImage, ImageDecoder, ImageReader};
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -15,7 +15,6 @@ use std::{
 };
 use tauri::{Manager, State};
 use uuid::Uuid;
-use walkdir::WalkDir;
 use zip::{write::SimpleFileOptions, ZipArchive, ZipWriter};
 
 struct AppPaths {
@@ -129,7 +128,14 @@ fn load_from_db(conn: &Connection) -> Result<Value> {
         )
         .ok();
     if let Some(value) = settings {
-        snapshot["settings"] = serde_json::from_str(&value)?;
+        let stored: Value = serde_json::from_str(&value)?;
+        if let Some(settings) = stored.as_object() {
+            for (key, value) in settings {
+                snapshot["settings"][key] = value.clone();
+            }
+        } else {
+            return Err(anyhow!("设置格式无效"));
+        }
     }
     Ok(snapshot)
 }
@@ -142,6 +148,12 @@ fn required_str<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
 }
 
 fn save_to_db(conn: &mut Connection, snapshot: &Value) -> Result<()> {
+    if snapshot["schemaVersion"] != 1 {
+        return Err(anyhow!("不支持的数据版本"));
+    }
+    if !snapshot["settings"].is_object() || !snapshot["spotTags"].is_array() {
+        return Err(anyhow!("设置或地点标签格式无效"));
+    }
     let tx = conn.transaction()?;
     tx.execute_batch("DELETE FROM spot_tags; DELETE FROM photos; DELETE FROM visits; DELETE FROM spots; DELETE FROM works; DELETE FROM tags;")?;
     for work in snapshot["works"]
@@ -206,7 +218,45 @@ fn save_to_db(conn: &mut Connection, snapshot: &Value) -> Result<()> {
 #[tauri::command]
 fn load_snapshot(state: State<AppState>) -> std::result::Result<Value, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常")?;
-    load_from_db(&conn).map_err(|e| e.to_string())
+    let mut snapshot = load_from_db(&conn).map_err(|e| e.to_string())?;
+    if let Some(photos) = snapshot["photos"].as_array_mut() {
+        for photo in photos {
+            if let Some(relative) = photo["relativePath"].as_str() {
+                if managed_media_path(relative).is_ok() {
+                    photo["fileUrl"] = json!(state.paths.root.join(relative).to_string_lossy());
+                }
+            }
+        }
+    }
+    Ok(snapshot)
+}
+
+fn managed_media_path(relative: &str) -> Result<&str> {
+    let mut parts = relative.split('/');
+    let folder = parts.next().unwrap_or("");
+    let name = parts.next().unwrap_or("");
+    if !["media", "thumbnails"].contains(&folder)
+        || name.is_empty()
+        || name == "."
+        || name == ".."
+        || name.contains(['\\', ':'])
+        || parts.next().is_some()
+    {
+        return Err(anyhow!("照片路径无效"));
+    }
+    Ok(relative)
+}
+
+fn photo_thumbnail(bytes: &[u8]) -> Result<(DynamicImage, u32, u32)> {
+    let mut decoder = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder.orientation()?;
+    let mut image = DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    let (width, height) = (image.width(), image.height());
+    let thumbnail = DynamicImage::ImageRgb8(image.thumbnail(900, 900).to_rgb8());
+    Ok((thumbnail, width, height))
 }
 
 #[tauri::command]
@@ -234,7 +284,11 @@ async fn fetch_anitabi(subject_id: u64) -> std::result::Result<Value, String> {
     }
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
-        .user_agent("JunreiJournal/0.1 (+https://github.com/)")
+        .user_agent(concat!(
+            "JunreiJournal/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/kumiko399/junrei-journal)"
+        ))
         .build()
         .map_err(|e| e.to_string())?;
     let lite = get_json_with_retry(
@@ -273,13 +327,12 @@ fn import_photo(
         let id = Uuid::new_v4().to_string();
         let filename = format!("{id}.{extension}");
         let target = state.paths.media.join(&filename);
-        fs::write(&target, &bytes)?;
-        let image = ImageReader::new(Cursor::new(&bytes)).with_guessed_format()?.decode()?;
-        let thumbnail = image.thumbnail(900, 900);
+        let (thumbnail, width, height) = photo_thumbnail(&bytes)?;
         let thumb_name = format!("{id}.jpg");
         let thumb_path = state.paths.thumbnails.join(&thumb_name);
         thumbnail.save_with_format(&thumb_path, image::ImageFormat::Jpeg)?;
-        let value = json!({ "id": id, "spotId": spot_id, "visitId": visit_id, "relativePath": format!("media/{filename}"), "thumbnailPath": format!("thumbnails/{thumb_name}"), "fileUrl": target.to_string_lossy(), "sha256": hash, "photoType": "visit", "caption": null, "takenAt": null, "sortOrder": 0, "isCover": false, "width": image.width(), "height": image.height(), "createdAt": Utc::now().to_rfc3339() });
+        fs::write(&target, &bytes)?;
+        let value = json!({ "id": id, "spotId": spot_id, "visitId": visit_id, "relativePath": format!("media/{filename}"), "thumbnailPath": format!("thumbnails/{thumb_name}"), "fileUrl": target.to_string_lossy(), "sha256": hash, "photoType": "visit", "caption": null, "takenAt": null, "sortOrder": 0, "isCover": false, "width": width, "height": height, "createdAt": Utc::now().to_rfc3339() });
         Ok(value)
     })().map_err(|e| e.to_string())
 }
@@ -336,26 +389,32 @@ fn zip_backup(snapshot: &Value, paths: &AppPaths) -> Result<Vec<u8>> {
     let mut zip = ZipWriter::new(cursor);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let counts = json!({ "works": snapshot["works"].as_array().map_or(0, Vec::len), "spots": snapshot["spots"].as_array().map_or(0, Vec::len), "visits": snapshot["visits"].as_array().map_or(0, Vec::len), "photos": snapshot["photos"].as_array().map_or(0, Vec::len) });
-    let data = serde_json::to_vec_pretty(snapshot)?;
+    let mut backup_snapshot = snapshot.clone();
+    let mut media = std::collections::BTreeSet::new();
+    for photo in backup_snapshot["photos"]
+        .as_array_mut()
+        .ok_or_else(|| anyhow!("照片格式无效"))?
+    {
+        if let Some(relative) = photo["relativePath"]
+            .as_str()
+            .filter(|value| value.starts_with("media/"))
+        {
+            media.insert(managed_media_path(relative)?.to_owned());
+            if let Some(thumbnail) = photo["thumbnailPath"].as_str() {
+                media.insert(managed_media_path(thumbnail)?.to_owned());
+            }
+            photo.as_object_mut().unwrap().remove("fileUrl");
+        }
+    }
+    let data = serde_json::to_vec_pretty(&backup_snapshot)?;
     let manifest = json!({ "format": "junrei-backup-v1", "createdAt": Utc::now().to_rfc3339(), "appVersion": env!("CARGO_PKG_VERSION"), "counts": counts, "dataSha256": format!("{:x}", Sha256::digest(&data)) });
     zip.start_file("manifest.json", options)?;
     zip.write_all(&serde_json::to_vec_pretty(&manifest)?)?;
     zip.start_file("data.json", options)?;
     zip.write_all(&data)?;
-    for (folder, root) in [("media", &paths.media), ("thumbnails", &paths.thumbnails)] {
-        for entry in WalkDir::new(root)
-            .min_depth(1)
-            .max_depth(1)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .filter(|e| e.file_type().is_file())
-        {
-            zip.start_file(
-                format!("{folder}/{}", entry.file_name().to_string_lossy()),
-                options,
-            )?;
-            zip.write_all(&fs::read(entry.path())?)?;
-        }
+    for relative in media {
+        zip.start_file(&relative, options)?;
+        zip.write_all(&fs::read(paths.root.join(&relative)).context("备份缺少照片文件")?)?;
     }
     Ok(zip.finish()?.into_inner())
 }
@@ -414,6 +473,9 @@ fn read_backup(path: &Path, password: Option<&str>) -> Result<Vec<u8>> {
 }
 
 fn safe_extract_media(archive: &mut ZipArchive<Cursor<Vec<u8>>>, temp: &Path) -> Result<()> {
+    if archive.len() > 100_000 {
+        return Err(anyhow!("备份文件数量过多"));
+    }
     let mut total = 0u64;
     for index in 0..archive.len() {
         let mut item = archive.by_index(index)?;
@@ -423,16 +485,114 @@ fn safe_extract_media(archive: &mut ZipArchive<Cursor<Vec<u8>>>, temp: &Path) ->
         if !(name.starts_with("media") || name.starts_with("thumbnails")) || item.is_dir() {
             continue;
         }
+        managed_media_path(&name.to_string_lossy())?;
         total += item.size();
         if total > 5 * 1024 * 1024 * 1024 {
             return Err(anyhow!("备份解压后超过 5GB"));
         }
         let target = temp.join(name);
+        if target.exists() {
+            return Err(anyhow!("备份包含重复照片路径"));
+        }
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
         }
         let mut output = File::create(target)?;
         std::io::copy(&mut item, &mut output)?;
+    }
+    Ok(())
+}
+
+fn validate_restored_snapshot(snapshot: &Value, manifest: &Value, temp: &Path) -> Result<()> {
+    let mut validation = Connection::open_in_memory()?;
+    migrate(&validation)?;
+    save_to_db(&mut validation, snapshot).context("备份数据结构或关联无效")?;
+    let integrity: String = validation.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+    if integrity != "ok" {
+        return Err(anyhow!("备份数据库完整性检查失败"));
+    }
+    for table in ["works", "spots", "visits", "photos"] {
+        let count = snapshot[table].as_array().map_or(0, Vec::len) as u64;
+        if manifest["counts"][table].as_u64() != Some(count) {
+            return Err(anyhow!("备份记录数量校验失败：{table}"));
+        }
+    }
+    for photo in snapshot["photos"]
+        .as_array()
+        .ok_or_else(|| anyhow!("照片格式无效"))?
+    {
+        let relative = required_str(photo, "relativePath")?;
+        if relative.starts_with("media/") {
+            managed_media_path(relative)?;
+            let bytes = fs::read(temp.join(relative)).context("备份缺少照片文件")?;
+            if let Some(hash) = photo["sha256"].as_str() {
+                if hash != format!("{:x}", Sha256::digest(&bytes)) {
+                    return Err(anyhow!("备份照片校验失败"));
+                }
+            }
+            if let Some(thumbnail) = photo["thumbnailPath"].as_str() {
+                managed_media_path(thumbnail)?;
+                if !temp.join(thumbnail).is_file() {
+                    return Err(anyhow!("备份缺少缩略图"));
+                }
+            }
+        } else {
+            let remote = photo["fileUrl"].as_str().unwrap_or("");
+            if !(remote.starts_with("https://") || remote.starts_with("http://")) {
+                return Err(anyhow!("备份照片路径无效"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn install_restored_snapshot(
+    conn: &mut Connection,
+    snapshot: &Value,
+    incoming: &Path,
+    root: &Path,
+) -> Result<()> {
+    let rollback = tempfile::tempdir_in(root)?;
+    let mut copied: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
+    let result = (|| -> Result<()> {
+        for folder in ["media", "thumbnails"] {
+            let source = incoming.join(folder);
+            if !source.exists() {
+                continue;
+            }
+            let target = root.join(folder);
+            fs::create_dir_all(&target)?;
+            for entry in fs::read_dir(source)? {
+                let entry = entry?;
+                let destination = target.join(entry.file_name());
+                let original = if destination.exists() {
+                    let saved = rollback.path().join(format!(
+                        "{}-{}",
+                        folder,
+                        entry.file_name().to_string_lossy()
+                    ));
+                    fs::copy(&destination, &saved)?;
+                    Some(saved)
+                } else {
+                    None
+                };
+                copied.push((destination.clone(), original));
+                fs::copy(entry.path(), &destination)?;
+            }
+        }
+        save_to_db(conn, snapshot)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        for (destination, original) in copied.into_iter().rev() {
+            if let Some(saved) = original {
+                fs::copy(saved, &destination)
+                    .context("恢复失败，照片回滚失败；请使用恢复前的自动备份")?;
+            } else if destination.exists() {
+                fs::remove_file(destination)?;
+            }
+        }
+        return Err(error);
     }
     Ok(())
 }
@@ -463,28 +623,15 @@ fn restore_backup(
         let snapshot: Value = serde_json::from_slice(&data)?;
         let temp = tempfile::tempdir_in(&state.paths.root)?;
         safe_extract_media(&mut archive, temp.path())?;
+        validate_restored_snapshot(&snapshot, &manifest, temp.path())?;
         let safety = state.paths.root.join(format!(
             "before-restore-{}.junrei-backup",
             Utc::now().format("%Y%m%d-%H%M%S")
         ));
-        let conn = state.db.lock().map_err(|_| anyhow!("数据库锁异常"))?;
+        let mut conn = state.db.lock().map_err(|_| anyhow!("数据库锁异常"))?;
         let current = load_from_db(&conn)?;
         fs::write(safety, zip_backup(&current, &state.paths)?)?;
-        drop(conn);
-        for folder in ["media", "thumbnails"] {
-            let incoming = temp.path().join(folder);
-            if !incoming.exists() {
-                continue;
-            }
-            let target = state.paths.root.join(folder);
-            fs::create_dir_all(&target)?;
-            for entry in fs::read_dir(incoming)? {
-                let entry = entry?;
-                fs::copy(entry.path(), target.join(entry.file_name()))?;
-            }
-        }
-        let mut conn = state.db.lock().map_err(|_| anyhow!("数据库锁异常"))?;
-        save_to_db(&mut conn, &snapshot)?;
+        install_restored_snapshot(&mut conn, &snapshot, temp.path(), &state.paths.root)?;
         Ok(())
     })()
     .map_err(|e| e.to_string())
@@ -526,6 +673,151 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn sample_snapshot() -> Value {
+        let mut snapshot = default_snapshot();
+        snapshot["works"] = json!([{ "id": "work-1", "titleCn": "测试作品" }]);
+        snapshot["spots"] =
+            json!([{ "id": "spot-1", "workId": "work-1", "latitude": 35, "longitude": 139 }]);
+        snapshot
+    }
+
+    fn sample_manifest(snapshot: &Value) -> Value {
+        json!({ "counts": { "works": snapshot["works"].as_array().unwrap().len(), "spots": snapshot["spots"].as_array().unwrap().len(), "visits": snapshot["visits"].as_array().unwrap().len(), "photos": snapshot["photos"].as_array().unwrap().len() } })
+    }
+
+    #[test]
+    fn failed_database_save_preserves_existing_records() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let snapshot = sample_snapshot();
+        save_to_db(&mut conn, &snapshot).unwrap();
+        let mut invalid = snapshot.clone();
+        invalid["spots"][0]["workId"] = json!("missing-work");
+        assert!(save_to_db(&mut conn, &invalid).is_err());
+        assert_eq!(load_from_db(&conn).unwrap()["spots"], snapshot["spots"]);
+    }
+
+    #[test]
+    fn backup_validation_checks_version_relations_counts_and_photo_hashes() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot = sample_snapshot();
+        let manifest = sample_manifest(&snapshot);
+        validate_restored_snapshot(&snapshot, &manifest, temp.path()).unwrap();
+        let mut invalid = snapshot.clone();
+        invalid["schemaVersion"] = json!(2);
+        assert!(validate_restored_snapshot(&invalid, &manifest, temp.path()).is_err());
+        invalid = snapshot.clone();
+        invalid["spots"][0]["workId"] = json!("missing");
+        assert!(validate_restored_snapshot(&invalid, &manifest, temp.path()).is_err());
+        let mut wrong_count = manifest.clone();
+        wrong_count["counts"]["works"] = json!(2);
+        assert!(validate_restored_snapshot(&snapshot, &wrong_count, temp.path()).is_err());
+        invalid = snapshot.clone();
+        invalid["photos"] = json!([{ "id": "photo-1", "spotId": "spot-1", "relativePath": "media/photo.jpg", "sha256": "incorrect" }]);
+        let photo_manifest = sample_manifest(&invalid);
+        assert!(validate_restored_snapshot(&invalid, &photo_manifest, temp.path()).is_err());
+        fs::create_dir(temp.path().join("media")).unwrap();
+        fs::write(temp.path().join("media/photo.jpg"), b"test-image").unwrap();
+        assert!(validate_restored_snapshot(&invalid, &photo_manifest, temp.path()).is_err());
+        invalid["photos"][0]["sha256"] = json!(format!("{:x}", Sha256::digest(b"test-image")));
+        validate_restored_snapshot(&invalid, &photo_manifest, temp.path()).unwrap();
+    }
+
+    #[test]
+    fn restore_rolls_back_overwritten_and_new_files_on_database_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let incoming = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("media")).unwrap();
+        fs::create_dir(incoming.path().join("media")).unwrap();
+        fs::write(root.path().join("media/existing.jpg"), b"original").unwrap();
+        fs::write(incoming.path().join("media/existing.jpg"), b"replacement").unwrap();
+        fs::write(incoming.path().join("media/new.jpg"), b"new").unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let snapshot = sample_snapshot();
+        save_to_db(&mut conn, &snapshot).unwrap();
+        let mut invalid = snapshot.clone();
+        invalid["spots"][0]["workId"] = json!("missing");
+        assert!(
+            install_restored_snapshot(&mut conn, &invalid, incoming.path(), root.path()).is_err()
+        );
+        assert_eq!(
+            fs::read(root.path().join("media/existing.jpg")).unwrap(),
+            b"original"
+        );
+        assert!(!root.path().join("media/new.jpg").exists());
+        assert_eq!(load_from_db(&conn).unwrap()["spots"], snapshot["spots"]);
+    }
+
+    #[test]
+    fn transparent_photo_can_generate_jpeg_thumbnail() {
+        let image = DynamicImage::new_rgba8(3, 2);
+        let mut bytes = Cursor::new(Vec::new());
+        image.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+        let (thumbnail, width, height) = photo_thumbnail(bytes.get_ref()).unwrap();
+        assert_eq!((width, height), (3, 2));
+        thumbnail
+            .write_to(&mut Cursor::new(Vec::new()), image::ImageFormat::Jpeg)
+            .unwrap();
+    }
+
+    #[test]
+    fn jpeg_exif_orientation_is_applied_before_thumbnailing() {
+        let image = DynamicImage::new_rgb8(2, 3);
+        let mut jpeg = Cursor::new(Vec::new());
+        image.write_to(&mut jpeg, image::ImageFormat::Jpeg).unwrap();
+        let exif = b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0";
+        let mut bytes = vec![0xff, 0xd8, 0xff, 0xe1];
+        bytes.extend_from_slice(&((exif.len() + 2) as u16).to_be_bytes());
+        bytes.extend_from_slice(exif);
+        bytes.extend_from_slice(&jpeg.get_ref()[2..]);
+        let (thumbnail, width, height) = photo_thumbnail(&bytes).unwrap();
+        assert_eq!((width, height), (3, 2));
+        assert_eq!((thumbnail.width(), thumbnail.height()), (3, 2));
+    }
+
+    #[test]
+    fn media_paths_reject_traversal_and_windows_absolute_paths() {
+        for path in [
+            "media/../photo.jpg",
+            "media/..",
+            "media/C:photo.jpg",
+            "media/a\\b.jpg",
+            "other/file.jpg",
+        ] {
+            assert!(managed_media_path(path).is_err(), "{path}");
+        }
+        assert!(managed_media_path("media/photo.jpg").is_ok());
+    }
+
+    #[test]
+    fn backup_excludes_unreferenced_files_and_runtime_photo_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = AppPaths {
+            root: temp.path().to_owned(),
+            media: temp.path().join("media"),
+            thumbnails: temp.path().join("thumbnails"),
+            database: temp.path().join("test.db"),
+        };
+        fs::create_dir(&paths.media).unwrap();
+        fs::create_dir(&paths.thumbnails).unwrap();
+        fs::write(paths.media.join("kept.jpg"), b"kept").unwrap();
+        fs::write(paths.media.join("removed.jpg"), b"removed").unwrap();
+        let mut snapshot = sample_snapshot();
+        snapshot["photos"] = json!([{ "id": "photo-1", "spotId": "spot-1", "relativePath": "media/kept.jpg", "fileUrl": paths.media.join("kept.jpg").to_string_lossy() }]);
+        let bytes = zip_backup(&snapshot, &paths).unwrap();
+        let mut archive = ZipArchive::new(Cursor::new(bytes)).unwrap();
+        assert!(archive.by_name("media/kept.jpg").is_ok());
+        assert!(archive.by_name("media/removed.jpg").is_err());
+        let mut data = String::new();
+        archive
+            .by_name("data.json")
+            .unwrap()
+            .read_to_string(&mut data)
+            .unwrap();
+        let exported: Value = serde_json::from_str(&data).unwrap();
+        assert!(exported["photos"][0].get("fileUrl").is_none());
+    }
     #[test]
     fn database_roundtrip() {
         let mut conn = Connection::open_in_memory().unwrap();
