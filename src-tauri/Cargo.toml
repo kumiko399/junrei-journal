@@ -1,6 +1,6 @@
 [package]
 name = "junrei-journal"
-version = "0.1.0"
+version = "0.1.1"
 description = "Windows desktop pilgrimage journal"
 authors = ["Junrei Journal Contributors"]
 edition = "2021"

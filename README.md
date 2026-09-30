@@ -9,6 +9,8 @@
 
 > 当前版本处于早期开发阶段。请在升级或批量导入前创建备份。
 
+当前源码版本：**0.1.1**。可下载的版本以 [GitHub Releases](https://github.com/kumiko399/junrei-journal/releases) 页面为准；详细更新内容见[版本说明](RELEASE_NOTES.md)。
+
 ## 主要功能
 
 - 管理作品收藏、巡礼状态和完成进度
@@ -21,6 +23,26 @@
 - 使用 SQLite 在本地持久化数据
 - 导出普通 ZIP 备份或使用 age 加密的密码备份
 - 支持安装版和便携模式
+- 浅色、深色和跟随系统主题，支持紧凑导航、小窗口布局及弹窗键盘操作
+
+## 0.1.1 更新内容
+
+- 改善主题一致性、小窗口布局、地图筛选说明和空白页引导。
+- 地点详情可直接创建该地点的到访记录，到访日期默认使用本地日期。
+- 修复数据读取失败后误写回、保存提示卡住、重复照片导入和地图异步初始化问题。
+- 修复透明图片的 JPEG 缩略图生成，并按 EXIF 方向处理缩略图。
+- 备份前等待最新保存；恢复前验证数据和照片，失败时回滚已复制的文件。
+- 修复迁移或恢复后的本地照片路径，备份仅包含仍被记录引用的媒体。
+
+## 第一次使用
+
+1. 在“作品库”添加喜欢的动漫作品，或者在“数据导入”填写 Bangumi 作品 ID，预览并选择 Anitabi 地点后导入。
+2. 在“巡礼地图”筛选作品和城市，通过“添加地点”填写坐标，或通过“地图选点”直接选择位置。
+3. 打开地点详情，点击“记录到访”，填写日期、笔记、天气、同行者和评分。
+4. 在“照片墙”选择所属地点并导入 JPG、PNG 或 WebP 照片。
+5. 在“设置”选择主题，并定期导出完整备份。
+
+弹窗支持 `Escape` 关闭和 `Tab` 切换输入项。界面会显示保存状态；保存失败时请先重试保存，再关闭程序。
 
 ## 隐私与数据
 
@@ -35,13 +57,27 @@
 
 ## 下载与运行
 
-正式版本将通过 GitHub Releases 提供：
+从[原项目 GitHub Releases](https://github.com/kumiko399/junrei-journal/releases) 选择版本并下载，支持 Windows 10 22H2 / Windows 11 x64：
 
-- `setup.exe`：推荐的每用户 NSIS 安装包。
-- `portable.zip`：解压后运行的便携版。
+- `Junrei-Journal-v<版本>-setup.exe`：推荐的每用户 NSIS 安装包。
+- `Junrei-Journal-v<版本>-portable.zip`：便携版，必须完整解压后运行 `junrei-journal.exe`。
 - `checksums.txt`：发布文件的 SHA-256 校验值。
 
 首版安装包未购买代码签名证书，Windows SmartScreen 可能显示“未知发布者”。请仅从本项目的 GitHub Releases 页面下载，并核对校验值。
+
+在下载目录打开 PowerShell，用以下命令获取下载文件的 SHA-256，与同一 Release 的 `checksums.txt` 比较：
+
+```powershell
+Get-FileHash .\Junrei-Journal-v0.1.1-setup.exe -Algorithm SHA256
+Get-FileHash .\Junrei-Journal-v0.1.1-portable.zip -Algorithm SHA256
+```
+
+### 从 0.1.0 升级
+
+- 先在旧版本中导出完整备份，再退出旧程序；应用没有自动更新。
+- 安装版安装新版后继续使用原应用数据目录。
+- 便携版解压到新目录；退出程序后，将原便携版的整个 `data/` 文件夹复制到新版程序旁，再启动新版。请保留原目录和备份，确认新版能读取数据后再自行整理。
+- 数据结构仍为版本 1，备份格式仍为 `junrei-backup-v1`。备份不包含 Google API Key。
 
 ## 本地开发
 
@@ -51,6 +87,7 @@
 - Node.js 22+
 - Rust stable-msvc
 - Microsoft C++ Build Tools，勾选“Desktop development with C++”
+- Windows 10 / 11 SDK，包含资源编译器 `RC.EXE`
 - Microsoft Edge WebView2 Runtime
 
 安装 Tauri 的完整前置条件请参考 [Tauri Windows prerequisites](https://v2.tauri.app/start/prerequisites/)。
@@ -60,7 +97,9 @@
 ```powershell
 npm install
 npm test
+npm run check:version
 npm run build
+cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri:dev
 ```
 
@@ -79,6 +118,17 @@ npm run tauri:build
 ```
 
 NSIS 安装包生成在 `src-tauri/target/release/bundle/nsis/`。GitHub Actions 也会在版本标签发布时自动运行测试、构建安装包和便携版，并生成校验值。
+
+如果 Rust 构建提示找不到 `link.exe` 或 `RC.EXE`，请通过 Visual Studio Installer 确认已安装 C++ 桌面开发工具和 Windows SDK，并从对应的 x64 开发者命令行运行构建。前端构建成功不能代替桌面版测试或安装包验证。
+
+### Git 与发布流程
+
+- 在功能分支中整理改动，运行前端测试、构建、Rust 测试和版本一致性检查后提交。
+- `package.json`、npm 锁文件、Cargo 清单及锁文件、Tauri 配置和 `RELEASE_NOTES.md` 的版本必须一致；版本标签使用 `v<版本>`。
+- `main` 和 Pull Request 触发检查；推送版本标签后，只有检查通过才会构建安装包、便携版 ZIP 和 SHA-256 校验文件。
+- 工作流创建 **GitHub Release 草稿**。核对附件、校验值、条款和版本说明后，再由维护者公开发布；提交源码不会自动公开新安装包。
+- 发布包随附 `TERMS.md`、`PRIVACY.md`、`THIRD_PARTY_NOTICES.md` 和 `THIRD_PARTY_LICENSES.txt`，便携版也包含 README。
+- 不要提交个人数据、照片、备份、凭据、安装包、解压试用目录或父目录旧网站文件。项目工作规则见 [AGENTS.md](AGENTS.md)。
 
 ## 地图与数据来源
 
@@ -105,8 +155,10 @@ NSIS 安装包生成在 `src-tauri/target/release/bundle/nsis/`。GitHub Actions
 
 ```powershell
 npm test
+npm run check:version
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
+cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 npm run licenses
 ```
 
