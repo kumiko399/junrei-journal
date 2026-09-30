@@ -48,6 +48,7 @@ export class OpenMapAdapter implements MapAdapter {
   private spots: Spot[] = [];
   private picker = false;
   private options?: MapOptions;
+  private resizeObserver?: ResizeObserver;
 
   async mount(container: HTMLElement, options: MapOptions) {
     this.options = options;
@@ -62,12 +63,16 @@ export class OpenMapAdapter implements MapAdapter {
         layers: [{ id: "openstreetmap", type: "raster", source: "openstreetmap" }],
       },
     });
-    this.map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-right");
-    await new Promise<void>((resolve, reject) => {
-      this.map?.once("load", () => resolve());
-      this.map?.once("error", (event) => reject(event.error));
-    });
     const map = this.map;
+    this.resizeObserver = new ResizeObserver(() => map.resize());
+    this.resizeObserver.observe(container);
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), "top-left");
+    await new Promise<void>((resolve, reject) => {
+      map.once("load", () => resolve());
+      map.once("error", (event) => reject(event.error));
+      map.once("remove", () => reject(new Error("地图已关闭")));
+    });
+    if (this.map !== map) return;
     map.addSource("spots", { type: "geojson", data: this.featureCollection(), cluster: true, clusterMaxZoom: 13, clusterRadius: 48 });
     map.addLayer({ id: "clusters", type: "circle", source: "spots", filter: ["has", "point_count"], paint: { "circle-color": "#173b5b", "circle-radius": ["step", ["get", "point_count"], 19, 10, 24, 30, 30], "circle-stroke-color": "#fff", "circle-stroke-width": 3 } });
     map.addLayer({ id: "cluster-count", type: "symbol", source: "spots", filter: ["has", "point_count"], layout: { "text-field": ["get", "point_count_abbreviated"], "text-size": 13 }, paint: { "text-color": "#fff" } });
@@ -93,20 +98,24 @@ export class OpenMapAdapter implements MapAdapter {
   getView(): MapViewState { const center = this.map?.getCenter(); return { center: center ? { latitude: center.lat, longitude: center.lng } : { latitude: 36.2, longitude: 137.2 }, zoom: this.map?.getZoom() ?? 4.25 }; }
   focusSpot(id: string) { const spot = this.spots.find((item) => item.id === id); if (spot) this.map?.flyTo({ center: [spot.longitude, spot.latitude], zoom: Math.max(this.map.getZoom(), 13) }); }
   enableCoordinatePicker(enabled: boolean) { this.picker = enabled; if (this.map) this.map.getCanvas().style.cursor = enabled ? "crosshair" : ""; }
-  destroy() { this.map?.remove(); this.map = undefined; }
+  destroy() { this.resizeObserver?.disconnect(); this.map?.remove(); this.map = undefined; }
 }
 
-declare global { interface Window { google?: { maps: any }; __junreiGoogleReady?: () => void } }
+declare global { interface Window { google?: { maps: any }; __junreiGoogleReady?: () => void; gm_authFailure?: () => void } }
 
 let googlePromise: Promise<void> | null = null;
 function loadGoogle(apiKey: string): Promise<void> {
   if (window.google?.maps) return Promise.resolve();
   if (googlePromise) return googlePromise;
   googlePromise = new Promise((resolve, reject) => {
-    window.__junreiGoogleReady = resolve;
     const script = document.createElement("script");
+    const cleanup = () => { window.clearTimeout(timer); delete window.__junreiGoogleReady; delete window.gm_authFailure; };
+    const fail = () => { cleanup(); script.remove(); googlePromise = null; reject(new Error("Google Maps 加载失败，请检查网络或 API Key。")); };
+    const timer = window.setTimeout(fail, 15000);
+    window.__junreiGoogleReady = () => { cleanup(); resolve(); };
+    window.gm_authFailure = fail;
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&callback=__junreiGoogleReady&v=weekly`;
-    script.async = true; script.onerror = () => reject(new Error("Google Maps 脚本加载失败")); document.head.append(script);
+    script.async = true; script.onerror = fail; document.head.append(script);
   });
   return googlePromise;
 }
@@ -117,10 +126,15 @@ export class GoogleMapAdapter implements MapAdapter {
   private spots: Spot[] = [];
   private picker = false;
   private options?: MapOptions;
+  private destroyed = false;
+  private authFailure?: () => void;
   async mount(container: HTMLElement, options: MapOptions) {
     if (!options.googleApiKey) throw new Error("请先在设置中填写 Google Maps API Key");
     this.options = options;
     await loadGoogle(options.googleApiKey);
+    if (this.destroyed) return;
+    this.authFailure = () => options.onError("Google Maps 密钥验证失败，已回退到开放地图。");
+    window.gm_authFailure = this.authFailure;
     const maps = window.google!.maps;
     this.map = new maps.Map(container, { center: { lat: options.center.latitude, lng: options.center.longitude }, zoom: options.zoom, mapTypeControl: true, streetViewControl: false, fullscreenControl: false });
     this.map.addListener("click", (event: any) => { if (this.picker && event.latLng) options.onCoordinatePick({ latitude: event.latLng.lat(), longitude: event.latLng.lng() }); });
@@ -140,7 +154,7 @@ export class GoogleMapAdapter implements MapAdapter {
   getView(): MapViewState { const center = this.map?.getCenter(); return { center: center ? { latitude: center.lat(), longitude: center.lng() } : { latitude: 36.2, longitude: 137.2 }, zoom: this.map?.getZoom() ?? 4.25 }; }
   focusSpot(id: string) { const spot = this.spots.find((item) => item.id === id); if (spot) { this.map?.panTo({ lat: spot.latitude, lng: spot.longitude }); this.map?.setZoom(Math.max(this.map.getZoom(), 13)); } }
   enableCoordinatePicker(enabled: boolean) { this.picker = enabled; this.map?.setOptions({ draggableCursor: enabled ? "crosshair" : undefined }); }
-  destroy() { this.markers.forEach((marker) => marker.setMap(null)); this.markers = []; this.map = undefined; }
+  destroy() { this.destroyed = true; if (window.gm_authFailure === this.authFailure) delete window.gm_authFailure; this.markers.forEach((marker) => { window.google?.maps.event.clearInstanceListeners(marker); marker.setMap(null); }); this.markers = []; if (this.map) window.google?.maps.event.clearInstanceListeners(this.map); this.map = undefined; }
 }
 
 export const createMapAdapter = (provider: MapProvider): MapAdapter => provider === "google" ? new GoogleMapAdapter() : new OpenMapAdapter();

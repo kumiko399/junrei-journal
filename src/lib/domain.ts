@@ -1,7 +1,15 @@
-import type { AnitabiPreview, AppSnapshot, AnimeWork } from "../types";
+import type { AnitabiPreview, AppSnapshot, AnimeWork, Photo } from "../types";
 import { newId, nowIso } from "../types";
 
 export const normalizeTitle = (value: string) => value.trim().normalize("NFKC").toLocaleLowerCase();
+export function localDate(date = new Date()): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function addPhoto(snapshot: AppSnapshot, photo: Photo): AppSnapshot {
+  if (snapshot.photos.some((item) => item.id === photo.id || (photo.sha256 && item.sha256 === photo.sha256))) return snapshot;
+  return { ...snapshot, photos: [photo, ...snapshot.photos] };
+}
 export function formatSceneTime(totalSeconds: number): string { const seconds = Math.max(0, Math.floor(totalSeconds)); const minutes = Math.floor(seconds / 60); return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`; }
 
 export function importAnitabiPreview(snapshot: AppSnapshot, preview: AnitabiPreview, selectedPointIds: Set<string>) {
